@@ -1,6 +1,6 @@
 # KELP M&A Automation Pipeline
 
-## 🌊 AI-Powered Investment Teaser Generator
+## AI-Powered Investment Teaser Generator
 
 Automatically generates professional investment teaser presentations from company one-pagers using LLMs, web scraping, and data verification.
 
@@ -449,15 +449,6 @@ See `data/input/` for examples.
 
 ---
 
-## 🤝 Contributing
-
-1. Fork repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Commit changes: `git commit -m 'Add feature'`
-4. Push branch: `git push origin feature-name`
-5. Open Pull Request
-
----
 
 ## 📄 License
 
@@ -465,20 +456,3 @@ MIT License - See LICENSE file
 
 ---
 
-## 🙏 Acknowledgments
-
-- Streamlit for GUI framework
-- python-pptx for PPT generation
-- Playwright for web scraping
-- Ollama for local LLM inference
-- Google Gemini API
-
----
-
-## 📧 Support
-
-Issues: https://github.com/yourusername/kelp_ma_automation/issues
-
----
-
-**Built with ❤️ by Kelp M&A Team**
