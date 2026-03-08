@@ -387,7 +387,9 @@ class WebScraper:
     def _discover_pages_requests(self, base_url: str) -> Dict[str, List[str]]:
         """Visit homepage and find actual links using Requests + BeautifulSoup."""
         import requests
+        import urllib3
         from bs4 import BeautifulSoup
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         categories = self._get_page_categories_keywords()
         discovered = {k: [] for k in categories.keys()}
@@ -397,7 +399,7 @@ class WebScraper:
         }
 
         try:
-            resp = requests.get(base_url, headers=headers, timeout=10)
+            resp = requests.get(base_url, headers=headers, timeout=10, verify=False)
             if resp.status_code != 200:
                 logger.warning(f"Homepage fetch failed: {resp.status_code}")
                 return None
@@ -422,7 +424,7 @@ class WebScraper:
                 try:
                     if urlparse(full_url).netloc != urlparse(base_url).netloc:
                         continue
-                except:
+                except Exception:
                     continue
 
                 if full_url in visited_urls:
@@ -534,6 +536,8 @@ class WebScraper:
     def _scrape_with_requests(self, base_url: str, pages: Dict[str, List[str]]) -> Dict[str, Any]:
         """Fallback scraping with requests (unlimited text)."""
         import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         data = {}
         headers = {
@@ -545,7 +549,7 @@ class WebScraper:
         # Scrape main page if not already scraped
         if not any(p.page_type == 'homepage' for p in self.scraped_pages):
             try:
-                resp = requests.get(base_url, headers=headers, timeout=10)
+                resp = requests.get(base_url, headers=headers, timeout=10, verify=False)
                 if resp.status_code == 200:
                     text = self._extract_text(resp.text)
                     scraped = ScrapedPage(
@@ -576,7 +580,7 @@ class WebScraper:
 
                 try:
                     time.sleep(self.rate_limit_delay)
-                    resp = requests.get(url, headers=headers, timeout=10)
+                    resp = requests.get(url, headers=headers, timeout=10, verify=False)
                     if resp.status_code == 200:
                         text = self._extract_text(resp.text)
                         if text and len(text) > 200:
@@ -595,7 +599,8 @@ class WebScraper:
                             }
                             logger.info(f"  ✓ Scraped: {url} ({len(text)} chars)")
                             break
-                except:
+                except Exception as e:
+                    logger.debug(f"Failed to scrape {page_type}: {e}")
                     continue
         
         return data
@@ -613,8 +618,8 @@ class WebScraper:
             text = soup.get_text(separator=' ', strip=True)
             text = ' '.join(text.split())  # Clean whitespace
             return text
-        except:
-            # Basic regex fallback
+        except Exception as e:
+            logger.debug(f"BeautifulSoup extraction failed: {e}")
             text = re.sub(r'<[^>]+>', ' ', html)
             text = ' '.join(text.split())
             return text
@@ -632,7 +637,122 @@ class WebScraper:
         return {'industry_name': 'General Industry', 'sources': []}
     
     def _get_industry_news(self, domain: str) -> List[Dict]:
-        """Get industry news."""
+        """Get industry news - LIVE via Google News RSS, fallback to hardcoded."""
+        
+        # Try live news first
+        live_news = self._fetch_live_news(domain)
+        if live_news:
+            return live_news
+        
+        # Fallback to hardcoded
+        return self._get_hardcoded_news(domain)
+    
+    def _fetch_live_news(self, domain: str) -> List[Dict]:
+        """Fetch live industry news from Google News RSS."""
+        try:
+            import requests
+            import urllib.parse
+            import urllib3
+            import xml.etree.ElementTree as ET
+            from datetime import datetime, timedelta
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            # Build search query focused on industry trends
+            domain_queries = {
+                'manufacturing': 'India manufacturing industry growth trends',
+                'technology': 'India IT technology sector trends growth',
+                'logistics': 'India logistics supply chain industry trends',
+                'consumer': 'India consumer retail D2C brand trends',
+                'healthcare': 'India pharma healthcare industry trends',
+                'infrastructure': 'India infrastructure construction sector trends',
+                'chemicals': 'India specialty chemicals industry trends',
+                'automotive': 'India automotive EV industry trends',
+                'electronics': 'India electronics manufacturing industry trends',
+            }
+            
+            domain_lower = domain.lower()
+            query = domain_queries.get(domain_lower, f'India {domain_lower} industry trends growth')
+            
+            # URL encode the query
+            encoded_query = urllib.parse.quote(query)
+            rss_url = f'https://news.google.com/rss/search?q={encoded_query}&hl=en-IN&gl=IN&ceid=IN:en'
+            
+            response = requests.get(rss_url, timeout=10, verify=False, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            
+            if response.status_code != 200:
+                return []
+            
+            root = ET.fromstring(response.text)
+            channel = root.find('channel')
+            if channel is None:
+                return []
+            
+            news = []
+            cutoff = datetime.now() - timedelta(days=90)
+            
+            # Industry-relevance keywords
+            relevance_keywords = [
+                'growth', 'market', 'industry', 'sector', 'manufacturing',
+                'revenue', 'investment', 'export', 'demand', 'trend',
+                'billion', 'crore', 'GDP', 'policy', 'PLI', 'FDI',
+                'startup', 'technology', 'digital', 'innovation',
+                'supply chain', 'capacity', 'expansion', 'partnership'
+            ]
+            
+            for item in channel.findall('item'):
+                if len(news) >= 4:
+                    break
+                
+                title = item.find('title')
+                link = item.find('link')
+                pub_date = item.find('pubDate')
+                source = item.find('source')
+                
+                if title is None or link is None:
+                    continue
+                
+                headline = title.text or ''
+                
+                # Check relevance
+                headline_lower = headline.lower()
+                is_relevant = any(kw.lower() in headline_lower for kw in relevance_keywords)
+                if not is_relevant:
+                    continue
+                
+                # Parse date
+                date_str = ''
+                if pub_date is not None and pub_date.text:
+                    try:
+                        # RFC 822 format: "Sat, 08 Mar 2026 12:00:00 GMT"
+                        parsed_date = datetime.strptime(pub_date.text.strip()[:25], '%a, %d %b %Y %H:%M:%S')
+                        if parsed_date < cutoff:
+                            continue  # Skip old news
+                        date_str = parsed_date.strftime('%Y-%m')
+                    except (ValueError, IndexError):
+                        date_str = 'Recent'
+                
+                source_name = source.text if source is not None else 'Google News'
+                
+                news.append({
+                    'headline': headline,
+                    'source_name': source_name,
+                    'source_url': link.text or '#',
+                    'date': date_str,
+                    'live': True
+                })
+            
+            if news:
+                logger.info(f"Fetched {len(news)} live news articles for {domain}")
+            return news
+            
+        except Exception as e:
+            logger.warning(f"Live news fetch failed: {e}")
+            return []
+    
+    def _get_hardcoded_news(self, domain: str) -> List[Dict]:
+        """Fallback hardcoded industry news."""
         news_sources = {
             'manufacturing': [
                 {'headline': 'Electronics manufacturing sees 17% growth in FY24', 'source_name': 'Economic Times', 'source_url': 'https://economictimes.indiatimes.com/industry/cons-products/electronics', 'date': '2024-04'},

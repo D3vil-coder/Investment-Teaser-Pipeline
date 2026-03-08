@@ -404,7 +404,9 @@ class CitationVerifier:
         # Title
         title = doc.add_heading(f'Citation Report: {company_name}', 0)
         
-        # Summary
+        # SUMMARY BLOCK
+        doc.add_heading('SUMMARY', level=1)
+        
         total = len(self.citations)
         verified = sum(1 for c in self.citations if c.verified)
         rate = (verified / total * 100) if total > 0 else 100
@@ -413,12 +415,32 @@ class CitationVerifier:
         for c in self.citations:
             by_type[c.source_type] = by_type.get(c.source_type, 0) + 1
         
+        # Summary table
         summary = doc.add_paragraph()
-        summary.add_run(f'Total Claims: {total}\n').bold = True
-        summary.add_run(f'Verified: {verified} ({rate:.1f}%)\n')
-        summary.add_run(f'\nBy Source Type:\n')
-        for src_type, count in by_type.items():
-            summary.add_run(f'  • {src_type}: {count}\n')
+        run = summary.add_run(f'Total Claims: {total}\n')
+        run.bold = True
+        run.font.size = Pt(12)
+        
+        run2 = summary.add_run(f'Verified Claims: {verified} ({rate:.1f}%)\n')
+        run2.font.size = Pt(11)
+        
+        status = '✓ All claims verified' if rate == 100 else f'⚠ {total - verified} claim(s) unverified'
+        run3 = summary.add_run(f'Status: {status}\n\n')
+        run3.bold = True
+        run3.font.size = Pt(11)
+        
+        summary.add_run('Source Breakdown:\n').bold = True
+        for src_type, count in sorted(by_type.items()):
+            pct = (count / total * 100) if total > 0 else 0
+            summary.add_run(f'  • {src_type}: {count} ({pct:.0f}%)\n')
+        
+        # High-confidence indicator
+        high_conf = sum(1 for c in self.citations if c.verified and c.source_type in ('onepager', 'calculated'))
+        if total > 0:
+            conf_pct = (high_conf / total) * 100
+            summary.add_run(f'\nHigh-confidence sources (Data Pack + Calculated): {conf_pct:.0f}%\n')
+        
+        doc.add_paragraph('─' * 60)
         
         # Verified Citations by Slide
         doc.add_heading('Verified Citations', level=1)

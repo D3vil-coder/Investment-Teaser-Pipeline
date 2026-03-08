@@ -58,9 +58,9 @@ class BrandGuidelines:
     # Typography
     FONT_HEADING = "Arial"
     FONT_BODY = "Arial"
-    HEADING_SIZE = Pt(24)
+    HEADING_SIZE = Pt(26)
     HEADING_SIZE_SMALL = Pt(20)
-    BODY_SIZE = Pt(11)
+    BODY_SIZE = Pt(12)
     BODY_SIZE_SMALL = Pt(10)
     FOOTER_SIZE = Pt(9)
     

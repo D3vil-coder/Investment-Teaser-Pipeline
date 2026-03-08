@@ -327,7 +327,7 @@ class PPTAssembler:
         self._add_footer(slide)
     
     def _add_title(self, slide, text: str):
-        """Add slide title."""
+        """Add slide title - Arial Bold 26pt."""
         shape = slide.shapes.add_textbox(
             Inches(LAYOUT['margin_left']),
             Inches(LAYOUT['title_top']),
@@ -337,7 +337,7 @@ class PPTAssembler:
         tf = shape.text_frame
         p = tf.paragraphs[0]
         p.text = text
-        p.font.size = Pt(22)
+        p.font.size = Pt(26)
         p.font.bold = True
         p.font.name = self.brand.FONT_HEADING
         p.font.color.rgb = self.brand.PRIMARY.rgb
@@ -358,7 +358,7 @@ class PPTAssembler:
     
     def _add_section_box(self, slide, title: str, items: List[str],
                           left: float, top: float, width: float, height: float,
-                          max_items: int = 6, font_size: int = 9):
+                          max_items: int = 6, font_size: int = 11):
         """Add a section with title and bullet points."""
         shape = slide.shapes.add_textbox(
             Inches(left), Inches(top), Inches(width), Inches(height)
@@ -371,28 +371,32 @@ class PPTAssembler:
         tf = shape.text_frame
         tf.word_wrap = True
         
-        # Title
+        # Section Title - Arial Bold 14pt
         p = tf.paragraphs[0]
         p.text = title
-        p.font.size = Pt(11)
+        p.font.size = Pt(14)
         p.font.bold = True
         p.font.name = self.brand.FONT_HEADING
         p.font.color.rgb = self.brand.PRIMARY.rgb
         p.space_after = Pt(4)
         
-        # Items
+        # Items - word-wrap-aware, generous char limit
         for item in items[:max_items]:
             p = tf.add_paragraph()
-            # Truncate long items at word boundary (no "...")
             display_text = item
-            max_chars = int(width * 12)  # ~12 chars per inch
+            # Use generous limit: ~18 chars per inch at 11pt with word wrap
+            max_chars = int(width * 18)
             if len(display_text) > max_chars:
+                # Truncate at sentence/phrase boundary
                 words = display_text.split()
                 display_text = ""
                 for word in words:
                     if len(display_text) + len(word) + 1 > max_chars:
                         break
                     display_text = display_text + " " + word if display_text else word
+                # Ensure we don't end mid-phrase with dangling prepositions
+                if display_text and display_text.split()[-1].lower() in ('to', 'for', 'in', 'of', 'and', 'the', 'a', 'an', 'with', 'by'):
+                    display_text = ' '.join(display_text.split()[:-1])
             
             p.text = f"• {display_text}"
             p.font.size = Pt(font_size)
@@ -401,9 +405,9 @@ class PPTAssembler:
             p.space_before = Pt(2)
     
     def _add_text_box(self, slide, text: str, left: float, top: float,
-                       width: float, height: float, font_size: int = 10,
+                       width: float, height: float, font_size: int = 12,
                        is_paragraph: bool = False):
-        """Add a simple text box."""
+        """Add a simple text box - Arial Regular 12pt default."""
         shape = slide.shapes.add_textbox(
             Inches(left), Inches(top), Inches(width), Inches(height)
         )
@@ -437,7 +441,7 @@ class PPTAssembler:
             tf = shape.text_frame
             tf.word_wrap = True
             tf.paragraphs[0].text = hook
-            tf.paragraphs[0].font.size = Pt(10)
+            tf.paragraphs[0].font.size = Pt(11)
             tf.paragraphs[0].font.bold = True
             tf.paragraphs[0].font.name = self.brand.FONT_BODY
             tf.paragraphs[0].font.color.rgb = RGBColor(255, 255, 255)
@@ -479,31 +483,72 @@ class PPTAssembler:
     
     def _add_column_chart(self, slide, title: str, data: Dict[int, float],
                            left: float, top: float, width: float, height: float):
-        """Add a native PPT column chart."""
+        """Add a native PPT column chart with data table, axis labels, source footnote."""
+        sorted_years = sorted(data.keys())
         chart_data = ChartData()
-        chart_data.categories = [f"FY{str(y)[-2:]}" for y in sorted(data.keys())]
-        chart_data.add_series('', [data[y] for y in sorted(data.keys())])
+        chart_data.categories = [f"FY{str(y)[-2:]}" for y in sorted_years]
+        chart_data.add_series('', [data[y] for y in sorted_years])
         
-        chart = slide.shapes.add_chart(
+        chart_frame = slide.shapes.add_chart(
             XL_CHART_TYPE.COLUMN_CLUSTERED,
             Inches(left), Inches(top),
             Inches(width), Inches(height),
             chart_data
-        ).chart
+        )
+        chart = chart_frame.chart
         
         # Style
         chart.has_legend = False
         chart.has_title = True
         chart.chart_title.text_frame.paragraphs[0].text = title
-        chart.chart_title.text_frame.paragraphs[0].font.size = Pt(10)
+        chart.chart_title.text_frame.paragraphs[0].font.size = Pt(12)
         chart.chart_title.text_frame.paragraphs[0].font.bold = True
+        chart.chart_title.text_frame.paragraphs[0].font.name = self.brand.FONT_HEADING
         chart.chart_title.text_frame.paragraphs[0].font.color.rgb = self.brand.PRIMARY.rgb
+        
+        # Enable data table below chart (python-pptx sets the flag; no direct styling API)
+        chart.has_data_table = True
+        
+        # Axis labels
+        try:
+            value_axis = chart.value_axis
+            value_axis.has_title = True
+            value_axis.axis_title.text_frame.paragraphs[0].text = "₹ Crores"
+            value_axis.axis_title.text_frame.paragraphs[0].font.size = Pt(9)
+            value_axis.axis_title.text_frame.paragraphs[0].font.name = self.brand.FONT_BODY
+            value_axis.tick_labels.font.size = Pt(8)
+            value_axis.tick_labels.font.name = self.brand.FONT_BODY
+            
+            category_axis = chart.category_axis
+            category_axis.has_title = True
+            category_axis.axis_title.text_frame.paragraphs[0].text = "Financial Year"
+            category_axis.axis_title.text_frame.paragraphs[0].font.size = Pt(9)
+            category_axis.axis_title.text_frame.paragraphs[0].font.name = self.brand.FONT_BODY
+            category_axis.tick_labels.font.size = Pt(8)
+            category_axis.tick_labels.font.name = self.brand.FONT_BODY
+        except Exception:
+            pass  # Axis configuration may fail on some chart types
         
         # Color bars
         series = chart.series[0]
         for point in series.points:
             point.format.fill.solid()
             point.format.fill.fore_color.rgb = self.brand.PRIMARY.rgb
+        
+        # Source footnote below chart
+        fy_start = f"FY{str(sorted_years[0])[-2:]}" if sorted_years else ""
+        fy_end = f"FY{str(sorted_years[-1])[-2:]}" if sorted_years else ""
+        footnote_text = f"Source: Company Financials {fy_start}-{fy_end}"
+        footnote = slide.shapes.add_textbox(
+            Inches(left), Inches(top + height + 0.02),
+            Inches(width), Inches(0.2)
+        )
+        fn_tf = footnote.text_frame
+        fn_tf.paragraphs[0].text = footnote_text
+        fn_tf.paragraphs[0].font.size = Pt(7)
+        fn_tf.paragraphs[0].font.italic = True
+        fn_tf.paragraphs[0].font.name = self.brand.FONT_BODY
+        fn_tf.paragraphs[0].font.color.rgb = RGBColor(128, 128, 128)
     
     def _add_pie_chart(self, slide, title: str, data: Dict[str, float],
                         left: float, top: float, width: float, height: float):
@@ -571,54 +616,16 @@ class PPTAssembler:
         if parsed_data:
             self._add_pie_chart(slide, "Key Shareholders", parsed_data, left, top, width, height)
 
-    def _add_kpi_spotlights(self, slide, kpis: Dict[str, str], top: float):
-        """Add KPI spotlight boxes - highlighted key metrics."""
-        n = min(4, len(kpis))
-        if n == 0:
-            return
-        
-        box_width = (LAYOUT['content_width'] - (n - 1) * 0.2) / n
-        box_height = 0.7
-        
-        for i, (name, value) in enumerate(list(kpis.items())[:n]):
-            left = LAYOUT['margin_left'] + i * (box_width + 0.2)
-            
-            # Box with primary color background
-            shape = slide.shapes.add_textbox(
-                Inches(left), Inches(top),
-                Inches(box_width), Inches(box_height)
-            )
-            
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = self.brand.PRIMARY.rgb
-            
-            tf = shape.text_frame
-            tf.word_wrap = True
-            
-            # Value (large)
-            p = tf.paragraphs[0]
-            p.text = str(value)
-            p.font.size = Pt(18)
-            p.font.bold = True
-            p.font.color.rgb = RGBColor(255, 255, 255)
-            p.alignment = PP_ALIGN.CENTER
-            
-            # Name (small below)
-            p2 = tf.add_paragraph()
-            p2.text = name
-            p2.font.size = Pt(8)
-            p2.font.color.rgb = RGBColor(220, 220, 255)
-            p2.alignment = PP_ALIGN.CENTER
-    
     def _add_footer(self, slide):
-        """Add footer - positioned below metrics bar."""
+        """Add footer - Arial Regular 9pt."""
         footer = slide.shapes.add_textbox(
             Inches(0), Inches(LAYOUT['footer_top']),
             Inches(LAYOUT['slide_width']), Inches(LAYOUT['footer_height'])
         )
         tf = footer.text_frame
         tf.paragraphs[0].text = "Strictly Private & Confidential – Kelp Strategic Partners"
-        tf.paragraphs[0].font.size = Pt(8)
+        tf.paragraphs[0].font.size = Pt(9)
+        tf.paragraphs[0].font.name = self.brand.FONT_BODY
         tf.paragraphs[0].font.color.rgb = RGBColor(128, 128, 128)
         tf.paragraphs[0].alignment = PP_ALIGN.CENTER
 

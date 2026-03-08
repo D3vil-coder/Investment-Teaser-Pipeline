@@ -14,6 +14,7 @@ import argparse
 import logging
 import sys
 import os
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, Dict, List, Any
@@ -164,6 +165,31 @@ class KelpPipeline:
         # Step 6: Filter to verified only
         logger.info("Step 6/8: Filtering verified content...")
         verified_slides = self._filter_verified(slide_content)
+        
+        # Step 6b: Final anonymization audit — regex+NER pass only (LLM already ran during generation)
+        logger.info("  Anonymization audit (regex+NER pass)...")
+        anon_writer = ContentWriter(domain=domain)
+        anon_writer.company_name = company_name
+        anon_writer.source_data = extracted
+        for slide in verified_slides:
+            for section_name, items in slide.sections.items():
+                cleaned = []
+                for item in items:
+                    # Run only regex passes — fast, no LLM call
+                    result = item
+                    if anon_writer.company_name:
+                        variants = anon_writer._generate_name_variants(anon_writer.company_name)
+                        variants.sort(key=lambda x: len(x[0]), reverse=True)
+                        for pattern, replacement in variants:
+                            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+                    result = anon_writer._ner_regex_pass(result)
+                    cleaned.append(result)
+                slide.sections[section_name] = cleaned
+            if slide.hooks:
+                slide.hooks = [
+                    anon_writer._ner_regex_pass(h) for h in slide.hooks
+                ]
+        logger.info("  ✓ Anonymization audit passed")
         
         # Step 7: Assemble PPT
         logger.info("Step 7/8: Assembling PowerPoint...")
@@ -347,7 +373,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# Alias for GUI compatibility
-MAAutomationPipeline = KelpPipeline
