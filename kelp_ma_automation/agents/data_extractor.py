@@ -55,6 +55,7 @@ class CompanyData:
     future_plans: List[str] = field(default_factory=list)
     market_size: List[Dict[str, Any]] = field(default_factory=list)
     facilities: List[str] = field(default_factory=list)
+    operational_metrics: Dict[str, str] = field(default_factory=dict)
 
 
 class DataExtractor:
@@ -353,6 +354,30 @@ class DataExtractor:
                     indicators.append(indicator)
         
         self.data.key_operational_indicators = indicators
+        
+        # Deep extraction for manufacturing/operational metrics
+        op_metrics = {}
+        # Parse numeric indicators like "Order Book: ₹850 Cr", "Capacity Utilization: 78%"
+        for ind in indicators:
+            # Common patterns: "Label: Value" or "Label - Value"
+            match = re.search(r'(.+?)[:\-]\s*(.+)', ind)
+            if match:
+                key = match.group(1).lower().strip()
+                val = match.group(2).strip()
+                
+                # Normalize keys for the KPI dashboard
+                if 'order book' in key:
+                    op_metrics['order_book'] = val
+                elif 'utilization' in key:
+                    op_metrics['capacity_utilization'] = val
+                elif 'export' in key:
+                    op_metrics['export_revenue'] = val
+                elif 'sq ft' in key or 'area' in key or 'footprint' in key:
+                    op_metrics['facilities_sqft'] = val
+                elif 'cagr' in key:
+                    op_metrics['cagr'] = val
+        
+        self.data.operational_metrics = op_metrics
     
     def _extract_swot(self):
         """Extract SWOT analysis."""

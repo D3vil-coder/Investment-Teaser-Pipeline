@@ -89,8 +89,9 @@ class ImagePipeline:
         if domain_folder.exists() and domain_folder.is_dir():
             images = list(domain_folder.glob('*.png')) + list(domain_folder.glob('*.jpg')) + list(domain_folder.glob('*.jpeg'))
             if images:
-                # Return first image from domain folder
-                selected = str(images[0])
+                import random
+                # Return random image from domain folder
+                selected = str(random.choice(images))
                 logger.info(f"Found domain image: {selected}")
                 return selected
         

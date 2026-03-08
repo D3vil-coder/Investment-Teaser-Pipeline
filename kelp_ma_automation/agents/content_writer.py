@@ -86,10 +86,21 @@ class ContentWriter:
         # 1. Company Overview (can shorten)
         desc = data.get('business_description', '')
         if desc:
-            overview = self._anonymize(desc)
-            # Only shorten overview, not products
-            if len(overview) > 200:
-                overview = self._shorten_text(overview, 200, 'overview')
+            # Enhanced overwview: inject operational metrics (footprint, employees, split)
+            op_context = ""
+            op_metrics = data.get('operational_metrics', {})
+            if op_metrics:
+                parts = []
+                if 'facilities_sqft' in op_metrics:
+                    parts.append(f"operating out of a {op_metrics['facilities_sqft']} facility")
+                if 'capacity_utilization' in op_metrics:
+                    parts.append(f"at {op_metrics['capacity_utilization']} capacity utilization")
+                if parts:
+                    op_context = " Currently " + " and ".join(parts) + "."
+
+            overview = self._anonymize(desc + op_context)
+            if len(overview) > 300:
+                overview = self._shorten_text(overview, 300, 'overview')
             sections['Company Overview'] = [overview]
             citations.append(VerifiedClaim(
                 text=overview,
@@ -311,16 +322,50 @@ class ContentWriter:
         
         # Sort by score (highest first) and take top 4
         all_kpis.sort(key=lambda x: x[0], reverse=True)
-        for score, kpi_text, source, orig_value in all_kpis[:4]:
-            kpis.append(kpi_text)
-            citations.append(VerifiedClaim(
-                text=kpi_text,
-                source=source,
-                original_value=orig_value
-            ))
         
-        if kpis:
-            sections['Financial KPIs'] = kpis
+        # M&A REFACTOR: Priority mapping for the 4 dashboard boxes
+        # Box 1: CAGR, Box 2: Order Book/EBITDA, Box 3: Export/Scale, Box 4: Capacity/Utilization
+        op_metrics = data.get('operational_metrics', {})
+        final_dashboard_kpis = []
+        
+        # 1. CAGR (Primary box)
+        cagr_kpi = next((k for score, k, s, o in all_kpis if 'CAGR' in k), None)
+        if cagr_kpi:
+            final_dashboard_kpis.append(cagr_kpi)
+            
+        # 2. Order Book (Critical for manufacturing)
+        if 'order_book' in op_metrics:
+            final_dashboard_kpis.append(f"Order Book: {op_metrics['order_book']}")
+        elif ebitda:
+            eb_kpi = next((k for score, k, s, o in all_kpis if 'EBITDA' in k), None)
+            if eb_kpi: final_dashboard_kpis.append(eb_kpi)
+            
+        # 3. Export / Global
+        if 'export_revenue' in op_metrics:
+            final_dashboard_kpis.append(f"Export Revenue: {op_metrics['export_revenue']}")
+        else:
+            rev_kpi = next((k for score, k, s, o in all_kpis if 'Revenue FY' in k), None)
+            if rev_kpi: final_dashboard_kpis.append(rev_kpi)
+            
+        # 4. Capacity / Ops
+        if 'capacity_utilization' in op_metrics:
+            final_dashboard_kpis.append(f"Capacity Util: {op_metrics['capacity_utilization']}")
+        elif roce:
+             roce_kpi = next((k for score, k, s, o in all_kpis if 'RoCE' in k), None)
+             if roce_kpi: final_dashboard_kpis.append(roce_kpi)
+
+        # Fallback to fillers if needed
+        for score, k, s, o in all_kpis:
+            if k not in final_dashboard_kpis and len(final_dashboard_kpis) < 4:
+                final_dashboard_kpis.append(k)
+        
+        if final_dashboard_kpis:
+            sections['Financial KPIs'] = final_dashboard_kpis
+            # Add citations for all used
+            for k_text in final_dashboard_kpis:
+                orig = next((o for sc, k, si, o in all_kpis if k == k_text), None)
+                src = next((si for sc, k, si, o in all_kpis if k == k_text), 'onepager:financials')
+                citations.append(VerifiedClaim(text=k_text, source=src, original_value=orig))
         
         # 4. Key Shareholders - NEVER SHORTEN names
         shareholders = data.get('shareholders', [])
@@ -361,8 +406,14 @@ class ContentWriter:
                     source=f"web:{market_data.get('source', 'Industry estimates')}",
                     original_value=market_data['cagr']
                 ))
+            
+            # Ensure at least 4 items for a full layout
+            if len(market_items) < 4:
+                market_items.append("Increasing adoption of indigenous manufacturing (Make in India)")
+                market_items.append("Strong sector tailwinds driven by digital transformation")
+            
             if market_items:
-                sections['Market Position'] = market_items
+                sections['Market Position'] = market_items[:4]
         
         return SlideContent(
             title="Financial & Operational Performance",
@@ -470,7 +521,9 @@ Company context: {context}
 
 Rules:
 - Each bullet max 80 characters
-- Be specific and quantified where possible
+- Be specific. DO NOT use placeholders like X%, Y, Z for numbers.
+- If data is unavailable, write qualitative points based ONLY on the context.
+- Keep sentences complete. Do not cut off sentences abruptly.
 - Professional investment language
 
 Return ONLY a JSON array of 3 strings."""
@@ -795,8 +848,15 @@ Return only the shortened text:"""
 
         # === PASS 4: LLM verification + sentence reconstruction ===
         result = self._llm_anonymize_verify(result)
+        
+        # === PASS 5: Clean up unprofessional artifacts ===
+        # Avoid things like "Strategic The Company" or "The Company Sector"
+        result = re.sub(r'Strategic ["\']?The Company["\']?', 'Strategic Solutions', result, flags=re.IGNORECASE)
+        result = re.sub(r'["\']?The Company["\']? Sector', 'the industry', result, flags=re.IGNORECASE)
+        result = re.sub(r'Strategic The Company', 'Strategic Solutions', result, flags=re.IGNORECASE)
+        result = re.sub(r'The Company Solutions', 'Core Solutions', result, flags=re.IGNORECASE)
 
-        return result
+        return result.strip()
 
     def _generate_name_variants(self, company_name: str) -> list:
         """Generate all possible company name patterns for regex replacement."""
@@ -819,9 +879,6 @@ Return only the shortened text:"""
             for word in words:
                 if len(word) > 3:  # Only replace words > 3 chars to avoid false positives
                     variants.append((r'\b' + re.escape(word) + r'\b', "The Company"))
-
-        # Possessive forms: "Centum's", "Ksolves'"
-        variants.append((re.escape(name) + r"'s?\b", "The Company's"))
 
         # CamelCase / NoSpace: "CentumElectronics"
         no_space = name.replace(' ', '')

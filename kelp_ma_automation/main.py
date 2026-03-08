@@ -301,8 +301,10 @@ class KelpPipeline:
             verified_hooks = []
             if slide.hooks:
                 for hook in slide.hooks:
+                    # Robust handling for string or dict hooks
+                    hook_text = hook['text'] if isinstance(hook, dict) else str(hook)
                     is_verified = any(
-                        c.verified and (c.claim == hook or hook in c.claim or c.claim in hook)
+                        c.verified and (c.claim == hook_text or hook_text in c.claim or c.claim in hook_text)
                         for c in self.verifier.citations
                     )
                     if is_verified:

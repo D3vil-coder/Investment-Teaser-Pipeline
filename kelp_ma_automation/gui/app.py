@@ -162,6 +162,10 @@ def init_session_state():
         'ollama_model': 'phi4-mini:latest',
         'gemini_api_key': '',
         'gemini_model': 'gemini-2.0-flash',
+        'pipeline_result': None,
+        'ppt_path': '',
+        'citation_path': '',
+        'webdata_path': '',
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -199,7 +203,7 @@ def render_sidebar():
             st.session_state.ollama_model = st.selectbox(
                 "Model:",
                 ["phi4-mini:latest", "llama3.2:latest", "qwen2.5:latest", "mistral:latest"],
-                index=0
+                key="ollama_model_select"
             )
             st.info("💡 Ollama runs locally - no API key needed!")
         
@@ -210,12 +214,18 @@ def render_sidebar():
                 "API Key:",
                 value=st.session_state.gemini_api_key,
                 type="password",
-                help="Get from https://aistudio.google.com/apikey"
+                help="Get from https://aistudio.google.com/apikey",
+                key="gemini_key_input"
             )
             st.session_state.gemini_model = st.selectbox(
                 "Model:",
-                ["gemini-2.0-flash", "gemini-1.5-pro", "gemma-27b-it"],
-                index=0
+                [
+                    "gemini-2.0-flash", 
+                    "gemini-2.0-flash-lite-preview-02-05", 
+                    "gemini-1.5-pro", 
+                    "gemini-1.5-flash"
+                ],
+                key="gemini_model_select"
             )
         
         st.markdown("---")
@@ -234,6 +244,11 @@ def render_sidebar():
         </div>
         """, unsafe_allow_html=True)
         
+        if st.button("🗑️ Reset All", use_container_width=True):
+            st.session_state.pipeline_result = None
+            st.session_state.company_name = ''
+            st.rerun()
+            
         return output_dir
 
 
@@ -378,6 +393,55 @@ def render_output_section(result):
             st.metric("Web Sources", stats.get('web_sources', 0))
         with col4:
             st.metric("LLM Tokens", f"{stats.get('tokens_used', 0):,}")
+    
+    # NEW: Result Explorer Tabs
+    st.markdown("---")
+    st.markdown("### 🔍 Result Explorer")
+    
+    tab1, tab2, tab3 = st.tabs(["📄 Citations & Verification", "🌐 Web Data & Insights", "🎯 Content Summary"])
+    
+    with tab1:
+        st.markdown("#### Citation Verification Report")
+        cit_path = st.session_state.citation_path
+        if cit_path and os.path.exists(cit_path):
+             st.success(f"Citations verified and saved to Word document.")
+             st.info("The document contains full source mapping for every claim in the presentation.")
+        
+        # Show a summary table if possible
+        if result.get('stats'):
+            s = result['stats']
+            st.table({
+                "Metric": ["Total Claims", "Verified Claims", "Verification Rate", "Web Sources Used"],
+                "Value": [s['total_claims'], s['verified'], f"{s['verification_rate']:.1f}%", s['web_sources']]
+            })
+
+    with tab2:
+        st.markdown("#### Scraped Company & News Data")
+        # Try to find the MD file
+        output_dir = os.path.dirname(st.session_state.ppt_path) if st.session_state.ppt_path else "data/output"
+        files = os.listdir(output_dir)
+        company_slug = result.get('company', '').replace(' ', '_')
+        wd_file = next((f for f in files if company_slug in f and '_WebData_' in f), None)
+        
+        if wd_file:
+            wd_path = os.path.join(output_dir, wd_file)
+            st.session_state.webdata_path = wd_path
+            with open(wd_path, 'r', encoding='utf-8') as f:
+                md_content = f.read()
+            st.markdown("Showing raw data used for context & enrichment:")
+            st.code(md_content[:2000] + "...", language="markdown")
+            
+            with open(wd_path, 'rb') as f:
+                st.download_button("⬇️ Download Full Web Data (.md)", f.read(), wd_file, mime="text/markdown")
+        else:
+            st.warning("Web data file not found in output directory.")
+
+    with tab3:
+        st.markdown(f"#### Content Overview: {result.get('company')}")
+        st.write(f"**Industry Domain:** {result.get('domain', 'N/A')}")
+        if result.get('stats') and 'token_usage' in result['stats']:
+            t = result['stats']['token_usage']
+            st.json(t)
 
 
 def main():
@@ -428,6 +492,7 @@ def main():
     
     if generate_btn and company_name and uploaded_file:
         st.session_state.processing = True
+        st.session_state.pipeline_result = None # Clear old result
         
         # Save uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix='.md') as tmp:
@@ -439,12 +504,19 @@ def main():
         
         # Run pipeline
         result = run_pipeline(company_name, tmp_path, output_dir)
+        st.session_state.pipeline_result = result
+        st.session_state.ppt_path = result.get('ppt_path', '')
+        st.session_state.citation_path = result.get('citation_path', '')
         
         # Clean up temp file
         os.unlink(tmp_path)
         
         # Show outputs
         render_output_section(result)
+    
+    elif st.session_state.pipeline_result:
+        # Show persisted result on reload
+        render_output_section(st.session_state.pipeline_result)
         
         st.session_state.processing = False
     
