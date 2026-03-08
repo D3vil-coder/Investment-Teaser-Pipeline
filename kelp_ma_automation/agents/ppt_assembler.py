@@ -437,7 +437,7 @@ class PPTAssembler:
             # PROFESSIONAL PIE/DONUT CHART (Editable)
             self._add_shareholder_pie_chart(
                 slide, shareholders,
-                left=LAYOUT['margin_left'] + LAYOUT['col2_width'] + LAYOUT['col2_gap'] + 0.5,
+                left=LAYOUT['margin_left'] + LAYOUT['col2_width'] + LAYOUT['col2_gap'] + 1.2, # Shifted right for alignment
                 top=mid_row_top - 0.2, # Shifted slightly up to center vertically
                 width=3.5, # Appropriately sized
                 height=2.2

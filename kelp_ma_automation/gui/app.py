@@ -115,25 +115,42 @@ def get_custom_css():
         background-color: #f8f9fa;
     }}
     
+    /* Cards & White Boxes */
+    .stCard, .output-card, .progress-step, .stCard *, .output-card *, .progress-step * {{
+        color: #1a1a1a !important; /* Extremely dark for maximum contrast */
+    }}
+    
     /* Output cards */
     .output-card {{
-        background: white;
-        border-radius: 10px;
+        background: #ffffff !important;
+        border-radius: 12px;
         padding: 1.5rem;
         margin: 1rem 0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        border-left: 4px solid {KELP_COLORS['primary']};
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        border: 1px solid #eee;
+        border-left: 6px solid {KELP_COLORS['primary']};
     }}
     
-    /* Animations */
-    @keyframes pulse {{
-        0% {{ opacity: 1; }}
-        50% {{ opacity: 0.6; }}
-        100% {{ opacity: 1; }}
+    /* Interactive Editor Border */
+    .editor-section {{
+        border-top: 3px solid #f0f2f6;
+        padding-top: 2rem;
+        margin-top: 3rem;
     }}
-    
-    .processing {{
-        animation: pulse 1.5s ease-in-out infinite;
+
+    /* Web Data Preview Container - Vertical & Readable */
+    .web-preview {{
+        height: 500px;
+        overflow-y: scroll;
+        padding: 1.5rem;
+        background: #ffffff;
+        border: 2px solid #f0f2f6;
+        border-radius: 8px;
+        font-family: 'Inter', sans-serif;
+        font-size: 0.95rem;
+        line-height: 1.6;
+        color: #222 !important;
+        white-space: pre-wrap;
     }}
     
     /* Footer */
@@ -166,6 +183,10 @@ def init_session_state():
         'ppt_path': '',
         'citation_path': '',
         'webdata_path': '',
+        'chat_history': [],
+        'current_slides': None,
+        'edit_provider': 'ollama',
+        'edit_model': 'qwen2.5:latest',
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -202,7 +223,7 @@ def render_sidebar():
             st.markdown("#### Ollama Settings")
             st.session_state.ollama_model = st.selectbox(
                 "Model:",
-                ["phi4-mini:latest", "llama3.2:latest", "qwen2.5:latest", "mistral:latest"],
+                ["phi4-mini:latest", "llama3.2:latest", "qwen2.5:latest", "qwen2.5:3b", "mistral:latest"],
                 key="ollama_model_select"
             )
             st.info("💡 Ollama runs locally - no API key needed!")
@@ -412,7 +433,7 @@ def render_output_section(result):
             s = result['stats']
             st.table({
                 "Metric": ["Total Claims", "Verified Claims", "Verification Rate", "Web Sources Used"],
-                "Value": [s['total_claims'], s['verified'], f"{s['verification_rate']:.1f}%", s['web_sources']]
+                "Value": [str(s['total_claims']), str(s['verified']), f"{s['verification_rate']:.1f}%", str(s['web_sources'])]
             })
 
     with tab2:
@@ -428,8 +449,12 @@ def render_output_section(result):
             st.session_state.webdata_path = wd_path
             with open(wd_path, 'r', encoding='utf-8') as f:
                 md_content = f.read()
-            st.markdown("Showing raw data used for context & enrichment:")
-            st.code(md_content[:2000] + "...", language="markdown")
+            st.markdown("#### Research Insights (Vertical Document)")
+            st.markdown(f'''
+                <div class="web-preview">
+{md_content}
+                </div>
+            ''', unsafe_allow_html=True)
             
             with open(wd_path, 'rb') as f:
                 st.download_button("⬇️ Download Full Web Data (.md)", f.read(), wd_file, mime="text/markdown")
@@ -442,6 +467,111 @@ def render_output_section(result):
         if result.get('stats') and 'token_usage' in result['stats']:
             t = result['stats']['token_usage']
             st.json(t)
+    
+    # AI Edit Assistant Section
+    render_edit_chat(result)
+
+def render_edit_chat(result):
+    """Render the AI Chat Editor for real-time PPT updates."""
+    st.markdown('<div class="editor-section">', unsafe_allow_html=True)
+    st.markdown("### 💬 AI Edit Assistant")
+    
+    # Provider Settings for Edit Agent Specifically
+    with st.expander("🛠️ Edit Agent Settings"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.edit_provider = st.radio(
+                "Chat Provider:", ["ollama", "gemini"], 
+                index=0 if st.session_state.edit_provider == 'ollama' else 1,
+                horizontal=True, key="edit_provider_radio"
+            )
+        with col2:
+            if st.session_state.edit_provider == 'ollama':
+                st.session_state.edit_model = st.selectbox(
+                    "Chat Model:", 
+                    ["qwen2.5:3b", "qwen2.5:latest", "phi4-mini:latest", "llama3.2:latest"],
+                    key="edit_model_select"
+                )
+            else:
+                st.session_state.edit_model = st.selectbox(
+                    "Chat Model:", 
+                    ["gemini-2.0-flash", "gemini-1.5-flash"],
+                    key="edit_model_select_gem"
+                )
+    
+    if not st.session_state.pipeline_result:
+        st.warning("Please generate a teaser first to use the Edit Assistant.")
+        return
+
+    # Initialize slides in session state if not already there
+    if st.session_state.current_slides is None:
+        st.session_state.current_slides = result.get('stats', {}).get('verified_slides', [])
+
+    # Chat Display
+    chat_container = st.container(height=300)
+    for msg in st.session_state.chat_history:
+        with chat_container.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Chat Input
+    if prompt := st.chat_input("Ex: 'Make the growth points more aggressive' or 'Summarize recent milestones'"):
+        with chat_container.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+
+        # Call Edit Agent
+        from agents.edit_agent import EditAgent
+        from agents.ppt_assembler import PPTAssembler
+        from types import SimpleNamespace
+        
+        agent = EditAgent(
+            llm_provider=st.session_state.edit_provider,
+            model_name=st.session_state.edit_model,
+            api_key=st.session_state.gemini_api_key if st.session_state.edit_provider == 'gemini' else None
+        )
+        
+        with st.spinner("AI is refining the content..."):
+            stats = result.get('stats', {})
+            updated_slides = agent.edit_content(
+                prompt, 
+                st.session_state.current_slides,
+                stats.get('extracted_data', {}),
+                stats.get('web_data', {})
+            )
+            
+            if updated_slides:
+                st.session_state.current_slides = updated_slides
+                
+                # RE-ASSEMBLE PPT
+                try:
+                    # Convert dicts to SimpleNamespace for PPTAssembler
+                    obj_slides = [SimpleNamespace(**s) for s in updated_slides]
+                    
+                    # Output path - VERSIONED
+                    old_path = st.session_state.ppt_path
+                    # version based on timestamp + chat message count
+                    v_suffix = f"_v{len(st.session_state.chat_history)}"
+                    new_path = old_path.replace('.pptx', '').split('_v')[0] + f"{v_suffix}.pptx"
+                    
+                    assembler = PPTAssembler(domain=stats.get('domain', 'manufacturing'))
+                    assembler.build(
+                        obj_slides, 
+                        stats.get('extracted_data', {}).get('financials', {}),
+                        new_path
+                    )
+                    
+                    st.session_state.ppt_path = new_path
+                    response = f"✅ Content refined and PPT updated! Version saved as: **{os.path.basename(new_path)}**"
+                    
+                    with chat_container.chat_message("assistant"):
+                        st.markdown(response)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response})
+                    st.rerun() # Refresh to update download buttons
+                    
+                except Exception as e:
+                    st.error(f"Failed to update PPT: {e}")
+            else:
+                st.error("AI failed to modify the content. Try again with a different instruction.")
 
 
 def main():
@@ -514,10 +644,9 @@ def main():
         # Show outputs
         render_output_section(result)
     
-    elif st.session_state.pipeline_result:
+    else:
         # Show persisted result on reload
         render_output_section(st.session_state.pipeline_result)
-        
         st.session_state.processing = False
     
     # Sample data section

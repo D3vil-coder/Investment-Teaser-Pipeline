@@ -241,6 +241,9 @@ class KelpPipeline:
             'token_usage': token_tracker.get_summary(),
             'ppt_path': ppt_path,
             'citation_path': citation_path,
+            'verified_slides': [self._slide_to_dict(s) for s in verified_slides],
+            'extracted_data': extracted,
+            'web_data': web_data,
         }
         
         # Summary
@@ -318,6 +321,15 @@ class KelpPipeline:
             ))
         
         return result
+
+    def _slide_to_dict(self, slide: SlideContent) -> Dict:
+        """Serialize SlideContent to dict."""
+        return {
+            'title': slide.title,
+            'sections': slide.sections,
+            'metrics': slide.metrics,
+            'hooks': slide.hooks
+        }
     
     def process_batch(self, companies: list, skip_scraping: bool = False) -> Dict:
         """Process multiple companies."""
