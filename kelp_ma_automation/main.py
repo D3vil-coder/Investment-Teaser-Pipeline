@@ -54,7 +54,11 @@ class KelpPipeline:
         
         # Initialize agents
         self.extractor = DataExtractor()
-        self.classifier = DomainClassifier()
+        self.classifier = DomainClassifier(
+            llm_provider=self.llm_provider, 
+            model=self.model_name, 
+            api_key=self.api_key
+        )
         self.scraper = WebScraper(use_playwright=False)
         self.verifier = CitationVerifier()
         
@@ -64,7 +68,8 @@ class KelpPipeline:
         logger.info("Pipeline initialized")
     
     def process(self, company_name: str, md_file: str,
-                skip_scraping: bool = False) -> Tuple[str, str, Dict]:
+                skip_scraping: bool = False,
+                status_callback=None) -> Tuple[str, str, Dict]:
         """
         Process a company through the full pipeline.
         
@@ -82,6 +87,9 @@ class KelpPipeline:
         # Load MD content
         with open(md_file, 'r', encoding='utf-8') as f:
             md_content = f.read()
+            
+        # STEP 0: Extract
+        if status_callback: status_callback(0, "Extracting data from one-pager...")
         
         # Step 1: Extract data
         logger.info("Step 1/7: Extracting data from one-pager...")
@@ -93,6 +101,9 @@ class KelpPipeline:
             for issue in issues[:3]:
                 logger.warning(f"  ⚠ {issue}")
         
+        # STEP 1: Classify
+        if status_callback: status_callback(1, "Classifying industry domain...")
+        
         # Step 2: Classify domain
         logger.info("Step 2/7: Classifying domain...")
         domain, confidence, reasoning = self.classifier.classify(
@@ -102,6 +113,9 @@ class KelpPipeline:
         )
         domain_name = self.classifier.get_domain_name(domain)
         logger.info(f"  Domain: {domain_name} ({confidence:.1%} confidence)")
+        
+        # STEP 2: Scrape
+        if status_callback: status_callback(2, "Scraping web data (fetching market details)...")
         
         # Step 3: Web scraping (enhanced)
         web_data = {}
@@ -129,10 +143,18 @@ class KelpPipeline:
                 logger.warning(f"  Web scraping failed: {e}")
         else:
             logger.info("Step 3/7: Skipping web scraping")
-        
+            
+        # STEP 3: Content Writer
+        if status_callback: status_callback(3, "Generating AI slide content...")
+            
         # Step 4: Generate content with fixed structure
         logger.info("Step 4/7: Generating slide content...")
-        writer = ContentWriter(domain=domain)
+        writer = ContentWriter(
+            domain=domain,
+            llm_provider=self.llm_provider,
+            model_name=self.model_name,
+            api_key=self.api_key
+        )
         writer.set_web_data(web_data)  # Pass web data for enrichment
         slide_content = writer.generate_slide_content(extracted, company_name)
         
@@ -140,6 +162,9 @@ class KelpPipeline:
         for i, slide in enumerate(slide_content, 1):
             sections = slide.sections
             logger.info(f"  Slide {i}: {len(sections)} sections, {len(slide.citations)} claims")
+        
+        # STEP 4: Citations
+        if status_callback: status_callback(4, "Verifying citations and claims...")
         
         # Step 5: Verify citations (including web data)
         logger.info("Step 5/8: Verifying all claims...")
@@ -162,13 +187,21 @@ class KelpPipeline:
         rate = (total_verified / total_claims * 100) if total_claims > 0 else 100
         logger.info(f"  Overall: {total_verified}/{total_claims} ({rate:.1f}%)")
         
+        # STEP 5: Assemble
+        if status_callback: status_callback(5, "Assembling PowerPoint deck...")
+        
         # Step 6: Filter to verified only
         logger.info("Step 6/8: Filtering verified content...")
         verified_slides = self._filter_verified(slide_content)
         
         # Step 6b: Final anonymization audit — regex+NER pass only (LLM already ran during generation)
         logger.info("  Anonymization audit (regex+NER pass)...")
-        anon_writer = ContentWriter(domain=domain)
+        anon_writer = ContentWriter(
+            domain=domain,
+            llm_provider=self.llm_provider,
+            model_name=self.model_name,
+            api_key=self.api_key
+        )
         anon_writer.company_name = company_name
         anon_writer.source_data = extracted
         for slide in verified_slides:
@@ -215,6 +248,9 @@ class KelpPipeline:
         report = self.verifier.generate_report(company_name, citation_path)
         logger.info(f"  ✓ Citations saved: {citation_path}")
         
+        # STEP 6: Finalize/Save
+        if status_callback: status_callback(6, "Saving outputs and cleanup...")
+        
         # Step 8: Save scraped data as MD
         logger.info("Step 8/8: Saving scraped data...")
         if web_data:
@@ -239,6 +275,7 @@ class KelpPipeline:
             'web_sources': len(web_data.get('sources_used', [])),
             'market_data_available': bool(web_data.get('market_data')),
             'token_usage': token_tracker.get_summary(),
+            'tokens_used': token_tracker.total_tokens,
             'ppt_path': ppt_path,
             'citation_path': citation_path,
             'verified_slides': [self._slide_to_dict(s) for s in verified_slides],
@@ -261,13 +298,13 @@ class KelpPipeline:
         
         return ppt_path, citation_path, stats
     
-    def process_company(self, company_name: str, md_file: str, output_dir: str = None):
+    def process_company(self, company_name: str, md_file: str, output_dir: str = None, status_callback=None):
         """Alias for process() method for GUI compatibility."""
         if output_dir:
             self.output_dir = Path(output_dir)
             self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        ppt_path, citation_path, stats = self.process(company_name, md_file)
+        ppt_path, citation_path, stats = self.process(company_name, md_file, status_callback=status_callback)
         
         # Return dict for GUI compatibility
         return {

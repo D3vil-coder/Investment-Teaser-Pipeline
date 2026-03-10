@@ -10,11 +10,7 @@ import logging
 from typing import Tuple, Dict, List, Optional
 from pathlib import Path
 
-try:
-    import ollama
-    OLLAMA_AVAILABLE = True
-except ImportError:
-    OLLAMA_AVAILABLE = False
+from utils.llm_client import LlmClient
     
 import yaml
 
@@ -81,42 +77,10 @@ class DomainClassifier:
     Falls back to keyword matching if LLM is unavailable.
     """
     
-    def __init__(self, model: str = "phi4-mini:latest"):
-        self.model = model
-        self.ollama_available = self._check_ollama()
-    
-    def _check_ollama(self) -> bool:
-        """Check if Ollama is available and model is pulled."""
-        if not OLLAMA_AVAILABLE:
-            logger.warning("Ollama package not installed. Using keyword fallback.")
-            return False
-        
-        try:
-            # Try to list models to verify connection
-            models_response = ollama.list()
-            
-            # Handle different response formats
-            if hasattr(models_response, 'models'):
-                models = models_response.models
-                model_names = [str(m.model) if hasattr(m, 'model') else str(m) for m in models]
-            elif isinstance(models_response, dict):
-                models = models_response.get('models', [])
-                model_names = [m.get('name', '') if isinstance(m, dict) else str(m) for m in models]
-            else:
-                model_names = []
-            
-            # Check if our model is available
-            if any(self.model in name or name in self.model for name in model_names):
-                logger.info(f"Ollama model {self.model} is available")
-                return True
-            else:
-                logger.warning(f"Model {self.model} not found. Available: {model_names}")
-                logger.info("Using keyword fallback. Run 'ollama pull phi4-mini:latest' to enable LLM.")
-                return False
-        except Exception as e:
-            logger.warning(f"Ollama connection failed: {e}")
-            logger.info("Using keyword fallback. Make sure Ollama is running.")
-            return False
+    def __init__(self, llm_provider: str = "ollama", model: str = "phi4-mini:latest", api_key: str = None):
+        self.llm = LlmClient(provider=llm_provider, model=model, api_key=api_key)
+        self.ollama_available = self.llm.available if llm_provider == "ollama" else False
+        self.gemini_available = self.llm.available if llm_provider == "gemini" else False
     
     def classify(self, business_description: str, products: str = "", 
                  domain_hint: str = "") -> Tuple[str, float, str]:
@@ -141,7 +105,7 @@ class DomainClassifier:
         # Combine text for classification
         combined_text = f"{business_description}\n\nProducts/Services: {products}"
         
-        if self.ollama_available:
+        if self.llm.available:
             return self._classify_with_llm(combined_text)
         else:
             return self._classify_with_keywords(combined_text)
@@ -197,17 +161,9 @@ Respond ONLY with a JSON object (no markdown, no explanation):
 {{"domain": "<domain_key>", "confidence": <0.0 to 1.0>, "reasoning": "<brief explanation>"}}"""
 
         try:
-            response = ollama.generate(
-                model=self.model,
-                prompt=prompt,
-                options={
-                    "temperature": 0.1,  # Low temperature for consistency
-                    "top_p": 0.9,
-                    "num_predict": 200
-                }
-            )
-            
-            response_text = response.get('response', '').strip()
+            response_text = self.llm.generate(prompt, temperature=0.1, max_tokens=200, task="domain_classification")
+            if not response_text:
+                return self._classify_with_keywords(text)
             
             # Try to parse JSON from response
             json_match = re.search(r'\{[^}]+\}', response_text)

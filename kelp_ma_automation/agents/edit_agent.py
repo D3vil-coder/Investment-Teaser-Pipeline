@@ -7,12 +7,11 @@ import json
 import logging
 import re
 from typing import Dict, List, Any, Optional
+from utils.llm_client import LlmClient
 
 class EditAgent:
     def __init__(self, llm_provider='ollama', model_name='qwen2.5:latest', api_key=None):
-        self.provider = llm_provider
-        self.model = model_name
-        self.api_key = api_key
+        self.llm = LlmClient(provider=llm_provider, model=model_name, api_key=api_key)
         self.logger = logging.getLogger(__name__)
 
     def _to_serializable(self, obj: Any, depth: int = 0) -> Any:
@@ -59,7 +58,7 @@ class EditAgent:
 Return ONLY the updated JSON array of 3 slides. No intro/outro.
 """
         
-        result = self._call_llm(prompt)
+        result = self.llm.generate(prompt, temperature=0.2, max_tokens=2048, task="edit_request")
         
         if result:
             try:
@@ -100,25 +99,3 @@ Return ONLY the updated JSON array of 3 slides. No intro/outro.
                 
         return slide_content
 
-    def _call_llm(self, prompt: str) -> Optional[str]:
-        if self.provider == 'ollama':
-            try:
-                import ollama
-                response = ollama.generate(
-                    model=self.model,
-                    prompt=prompt,
-                    options={"temperature": 0.2, "num_predict": 2048}
-                )
-                return response.get('response', '')
-            except Exception as e:
-                self.logger.error(f"Ollama call failed: {e}")
-        elif self.provider == 'gemini':
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
-                model = genai.GenerativeModel(self.model)
-                response = model.generate_content(prompt)
-                return response.text
-            except Exception as e:
-                self.logger.error(f"Gemini call failed: {e}")
-        return None

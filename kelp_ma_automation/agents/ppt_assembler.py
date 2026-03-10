@@ -618,10 +618,20 @@ class PPTAssembler:
         p.font.color.rgb = self.brand.PRIMARY.rgb
         
         # Logo
+        logo_path = r"c:\IIT Bombay\AI\AI-ML GC\image.png"
+        if os.path.exists(logo_path):
+            # Place image at the left of the "KELP" label (Shifted more right)
+            slide.shapes.add_picture(
+                logo_path,
+                Inches(LAYOUT['slide_width'] - 1.25),
+                Inches(LAYOUT['title_top']),
+                height=Inches(0.35)
+            )
+            
         logo = slide.shapes.add_textbox(
-            Inches(LAYOUT['slide_width'] - 1.3),
+            Inches(LAYOUT['slide_width'] - 0.8),
             Inches(LAYOUT['title_top']),
-            Inches(1.0),
+            Inches(0.7),
             Inches(0.4)
         )
         logo_tf = logo.text_frame

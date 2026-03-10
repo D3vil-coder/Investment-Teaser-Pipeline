@@ -13,7 +13,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.ollama_client import OllamaClient
+from utils.llm_client import LlmClient
 from utils.token_tracker import token_tracker
 
 logging.basicConfig(level=logging.INFO)
@@ -53,9 +53,9 @@ class ContentWriter:
     Critical rule: NEVER shorten products, services, or key data.
     """
     
-    def __init__(self, domain: str = "manufacturing"):
+    def __init__(self, domain: str = "manufacturing", llm_provider: str = "ollama", model_name: str = "phi4-mini:latest", api_key: str = None):
         self.domain = domain
-        self.ollama = OllamaClient()
+        self.llm = LlmClient(provider=llm_provider, model=model_name, api_key=api_key)
         self.company_name = ""
         self.source_data = {}
         self.web_data = {}
@@ -509,7 +509,7 @@ class ContentWriter:
         for section_name in ['Key Strengths', 'Growth Opportunities', 'Market Opportunity']:
             if section_name not in sections or len(sections.get(section_name, [])) < min_items:
                 # Use LLM to generate additional points
-                if self.ollama.available:
+                if self.llm.available:
                     context = f"Company: {self.company_name}\n"
                     products = data.get('products_services', [])
                     context += f"Products: {', '.join(products[:3]) if products else 'N/A'}\n"
@@ -529,7 +529,7 @@ Rules:
 Return ONLY a JSON array of 3 strings."""
 
                     try:
-                        result = self.ollama.generate(prompt, temperature=0.3, max_tokens=200)
+                        result = self.llm.generate(prompt, temperature=0.3, max_tokens=200, task=f"expansion:{section_name}")
                         import json
                         cleaned = result.strip()
                         if cleaned.startswith('```'):
@@ -636,7 +636,7 @@ Return ONLY a JSON array of 3 strings."""
         context = "\n".join(context_parts)
         
         # Generate insights with LLM
-        if self.ollama.available:
+        if self.llm.available:
             prompt = f"""You are a senior M&A investment banker at a top-tier firm writing investment highlights for institutional PE/VC investors.
 
 Company Data:
@@ -661,12 +661,12 @@ EXAMPLES OF EXCELLENT HIGHLIGHTS:
 Return ONLY a JSON array of 3-4 strings. No explanation, no markdown.
 Example: ["First insight here", "Second insight here", "Third insight here"]"""
 
-            result = self.ollama.generate(prompt, temperature=0.3, max_tokens=300)
+            result = self.llm.generate(prompt, temperature=0.5, max_tokens=500, task="hook_generation")
             
             # Track tokens
             token_tracker.track_from_response(
                 task='hook_generation_llm',
-                model=self.ollama.model,
+                model=self.llm.model,
                 prompt=prompt,
                 response=result
             )
@@ -748,7 +748,7 @@ Example: ["First insight here", "Second insight here", "Third insight here"]"""
             return text
         
         # Use LLM for intelligent shortening
-        if self.ollama.available:
+        if self.llm.available:
             prompt = f"""Shorten this text to under {max_chars} characters while keeping the key meaning.
 Do NOT end with "..." or cut mid-word.
 
@@ -756,12 +756,12 @@ Text: {text}
 
 Return only the shortened text:"""
             
-            result = self.ollama.generate(prompt, temperature=0.2, max_tokens=80)
+            result = self.llm.generate(prompt, temperature=0.2, max_tokens=80, task=f"shortening:{context}")
             
             # Track tokens
             token_tracker.track_from_response(
                 task=f'text_shortening:{context}',
-                model=self.ollama.model,
+                model=self.llm.model,
                 prompt=prompt,
                 response=result or ''
             )
@@ -960,7 +960,7 @@ Return only the shortened text:"""
 
     def _llm_anonymize_verify(self, text: str) -> str:
         """LLM pass: verify anonymization and reconstruct incomplete sentences."""
-        if not self.ollama.available:
+        if not self.llm.available:
             return text
 
         # Only call LLM if text is substantial enough
@@ -984,7 +984,7 @@ Text to review:
 
 Return ONLY the corrected text, nothing else:"""
 
-            result = self.ollama.generate(prompt, temperature=0.1, max_tokens=len(text) + 100)
+            result = self.llm.generate(prompt, temperature=0.1, max_tokens=len(text) + 100, task="anonymization_audit")
 
             if result:
                 cleaned = result.strip().strip('"').strip("'")

@@ -267,13 +267,10 @@ class DataExtractor:
     def _parse_financial_row(self, row_data: str, convert_to_cr: bool = True) -> Dict[int, float]:
         """
         Parse financial row data.
-        Format: 2014: 4251.81863 | 2015: 4879.97017 | ...
-        
-        Note: MD files store revenue/EBITDA in Lakhs, so we convert to Crores.
-        Percentages (PAT Margin, RoCE, ROE) are kept as-is.
+        Smartly handles units (e.g., '1.2 Cr', '85 Lakhs', or just numbers).
+        Default is assumed to be Lakhs if no unit is found and convert_to_cr is True.
         """
         data = {}
-        # Split by | and parse each entry
         entries = row_data.split('|')
         for entry in entries:
             entry = entry.strip()
@@ -282,12 +279,33 @@ class DataExtractor:
                 if len(parts) == 2:
                     try:
                         year = int(parts[0].strip())
-                        value_str = parts[1].strip()
-                        if value_str.lower() != 'none' and value_str:
-                            value = float(value_str)
-                            # Convert Lakhs to Crores for monetary values
-                            if convert_to_cr and value > 100:  # Likely in Lakhs
-                                value = value / 100
+                        value_str = parts[1].strip().lower()
+                        
+                        if value_str != 'none' and value_str:
+                            # Extract pure number
+                            num_match = re.search(r'([-+]?\d*\.?\d+)', value_str)
+                            if not num_match:
+                                continue
+                            value = float(num_match.group(1))
+                            
+                            if convert_to_cr:
+                                # Unit detection logic
+                                is_cr = any(u in value_str for u in ['cr', 'crore'])
+                                is_lakh = any(u in value_str for u in ['lakh', 'lac', ' l']) # ' l' to avoid catching 'level'
+                                
+                                if is_cr:
+                                    # Already Cr, don't divide
+                                    pass
+                                elif is_lakh:
+                                    # Explicit Lakhs -> convert to Cr
+                                    value = value / 100
+                                else:
+                                    # No explicit unit found, assume Lakhs (source default)
+                                    # Unless it's already a very small number that looks like Cr?
+                                    # Re-adding a small heuristic: if it's < 100 it *might* be Cr, 
+                                    # but safer to stick to source default (Lakhs) as per user request
+                                    value = value / 100
+                                    
                             data[year] = value
                     except (ValueError, TypeError):
                         continue

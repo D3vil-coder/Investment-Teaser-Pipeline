@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 import tempfile
+from utils.token_tracker import token_tracker
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -217,6 +218,10 @@ def render_sidebar():
             horizontal=True
         )
         st.session_state.llm_provider = llm_provider
+        # Keep edit agent in sync unless user explicitly changes it
+        if 'edit_provider' not in st.session_state or st.session_state.edit_provider == st.session_state.get('last_provider', 'ollama'):
+            st.session_state.edit_provider = llm_provider
+        st.session_state.last_provider = llm_provider
         
         if llm_provider == 'ollama':
             st.markdown("---")
@@ -241,13 +246,18 @@ def render_sidebar():
             st.session_state.gemini_model = st.selectbox(
                 "Model:",
                 [
+                    "gemini-3-pro",
+                    "gemini-3-flash",
                     "gemini-2.0-flash", 
-                    "gemini-2.0-flash-lite-preview-02-05", 
-                    "gemini-1.5-pro", 
-                    "gemini-1.5-flash"
+                    "gemini-2.0-pro",
+                    "gemma-3-27b-it",
+                    "gemma-3-12b-it",
+                    "gemma-3-4b-it"
                 ],
                 key="gemini_model_select"
             )
+            if not st.session_state.gemini_api_key:
+                st.warning("⚠️ Please enter a Gemini API Key")
         
         st.markdown("---")
         st.markdown("### Output Settings")
@@ -299,7 +309,7 @@ def render_progress(steps, current_step, step_status):
 
 
 def run_pipeline(company_name: str, md_file_path: str, output_dir: str):
-    """Run the M&A automation pipeline with progress updates."""
+    """Run the M&A automation pipeline with REAL progress updates."""
     from main import MAAutomationPipeline
     
     steps = [
@@ -312,45 +322,56 @@ def run_pipeline(company_name: str, md_file_path: str, output_dir: str):
         "💾 Saving outputs"
     ]
     
+    # Initialize UI state
+    step_status = {i: 'pending' for i in range(len(steps))}
     progress_placeholder = st.empty()
-    status_text = st.empty()
     
-    step_status = {}
+    def update_ui(active_idx, status_msg):
+        # Update statuses: previous as complete, current as processing
+        for j in range(active_idx):
+            step_status[j] = 'complete'
+        step_status[active_idx] = 'processing'
+        
+        with progress_placeholder.container():
+            render_progress(steps, active_idx, step_status)
     
     try:
         # Initialize pipeline
+        provider = st.session_state.llm_provider
+        model = st.session_state.ollama_model if provider == 'ollama' else st.session_state.gemini_model
+        
         pipeline = MAAutomationPipeline(
-            llm_provider=st.session_state.llm_provider,
-            model_name=st.session_state.ollama_model if st.session_state.llm_provider == 'ollama' else st.session_state.gemini_model,
-            api_key=st.session_state.gemini_api_key if st.session_state.llm_provider == 'gemini' else None
+            llm_provider=provider,
+            model_name=model,
+            api_key=st.session_state.gemini_api_key if provider == 'gemini' else None
         )
         
-        for i, step_name in enumerate(steps):
-            step_status[i] = 'processing'
+        # Use st.status for a polished professional look with logs
+        with st.status("🚀 Orchestrating 7-Agent Pipeline...", expanded=True) as status:
+            def shadow_callback(idx, msg):
+                update_ui(idx, msg)
+                st.write(f"**Step {idx+1}:** {msg}")
             
+            # Actually run the pipeline with the callback
+            result = pipeline.process_company(
+                company_name, 
+                md_file_path, 
+                output_dir, 
+                status_callback=shadow_callback
+            )
+            
+            # Final UI cleanup
+            for j in range(len(steps)):
+                step_status[j] = 'complete'
             with progress_placeholder.container():
-                render_progress(steps, i, step_status)
+                render_progress(steps, len(steps)-1, step_status)
             
-            status_text.markdown(f"**{step_name}**")
-            time.sleep(0.3)  # Small delay for visual effect
-            
-            # Execute step (simulated - actual integration below)
-            step_status[i] = 'complete'
-        
-        # Actually run the pipeline
-        result = pipeline.process_company(company_name, md_file_path, output_dir)
-        
-        # Final update
-        with progress_placeholder.container():
-            render_progress(steps, len(steps) - 1, step_status)
-        
-        status_text.success("✅ Pipeline completed successfully!")
+            status.update(label="✅ Pipeline Completed Successfully!", state="complete", expanded=False)
         
         return result
         
     except Exception as e:
-        step_status[len([s for s in step_status.values() if s == 'complete'])] = 'error'
-        status_text.error(f"❌ Error: {str(e)}")
+        st.error(f"❌ Pipeline Failed: {str(e)}")
         st.exception(e)
         return None
 
@@ -495,7 +516,7 @@ def render_edit_chat(result):
             else:
                 st.session_state.edit_model = st.selectbox(
                     "Chat Model:", 
-                    ["gemini-2.0-flash", "gemini-1.5-flash"],
+                    ["gemini-3-pro", "gemini-3-flash", "gemini-2.0-flash", "gemma-3-27b-it", "gemma-3-4b-it"],
                     key="edit_model_select_gem"
                 )
     
@@ -524,10 +545,14 @@ def render_edit_chat(result):
         from agents.ppt_assembler import PPTAssembler
         from types import SimpleNamespace
         
+        provider = st.session_state.edit_provider
+        model = st.session_state.edit_model
+        st.caption(f"Using {provider} ({model})")
+        
         agent = EditAgent(
-            llm_provider=st.session_state.edit_provider,
-            model_name=st.session_state.edit_model,
-            api_key=st.session_state.gemini_api_key if st.session_state.edit_provider == 'gemini' else None
+            llm_provider=provider,
+            model_name=model,
+            api_key=st.session_state.gemini_api_key if provider == 'gemini' else None
         )
         
         with st.spinner("AI is refining the content..."):
@@ -561,6 +586,10 @@ def render_edit_chat(result):
                     )
                     
                     st.session_state.ppt_path = new_path
+                    # Update token count in session state
+                    if st.session_state.pipeline_result:
+                        st.session_state.pipeline_result['stats']['tokens_used'] = token_tracker.total_tokens
+                    
                     response = f"✅ Content refined and PPT updated! Version saved as: **{os.path.basename(new_path)}**"
                     
                     with chat_container.chat_message("assistant"):
