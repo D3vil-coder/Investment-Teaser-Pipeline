@@ -1,458 +1,68 @@
-# KELP M&A Automation Pipeline
+# Investment Teaser Pipeline
 
-## AI-Powered Investment Teaser Generator
+An experimental document-generation pipeline that turns a company one-pager into a three-slide investment teaser. The project combines structured extraction, industry classification, website discovery, optional local language-model generation, citation matching, and PowerPoint assembly. It was developed for the KELP AI General Championship at IIT Bombay.
 
-Automatically generates professional investment teaser presentations from company one-pagers using LLMs, web scraping, and data verification.
+**Example:** The repository includes [a sample PowerPoint](Sample%20Output.pptx) and company one-pagers such as [Centum](Centum-OnePager.md). The sample is an illustration, not an independently validated financial report.
 
----
+## Pipeline
 
-## 📋 Table of Contents
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Setup](#setup)
-- [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-
----
-
-## 🎯 Overview
-
-The KELP M&A Automation Pipeline is an end-to-end system that transforms company information into investor-ready PowerPoint presentations. It combines:
-
-- **AI-powered content generation** using local LLMs (Ollama) or Gemini API
-- **Intelligent web scraping** for market data and company insights
-- **Automated slide generation** with domain-specific templates
-- **Citation verification** to ensure data accuracy
-- **Beautiful GUI** built with Streamlit
-
-### What It Does
-
-**Input**: Company one-pager (Markdown file)  
-**Output**: Professional 3-slide investment teaser PPT + citation report
-
-**Slides Generated**:
-1. **Business Profile** - Company overview, products, industries, with company image
-2. **Financials** - Revenue/EBITDA charts, KPIs, shareholder pie chart
-3. **Investment Highlights** - AI-generated investor insights, strengths, opportunities
-
----
-
-## ✨ Features
-
-### Core Capabilities
-- ✅ **Multi-Domain Support**: 8 industry templates (Manufacturing, Technology, Logistics, Consumer, Healthcare, Infrastructure, Chemicals, Automotive)
-- ✅ **Smart Web Scraping**: 3-tier fallback system (Playwright → Requests → Guessing) to find company pages
-- ✅ **LLM-Generated Insights**: Real investor-grade highlights (not templates)
-- ✅ **Shareholder Visualization**: Native PPT pie charts with data labels
-- ✅ **Image Pipeline**: Intelligent selection + aspect ratio handling (3:2)
-- ✅ **Citation Tracking**: Full source verification with detailed reports
-- ✅ **Token Cost Tracking**: USD + INR cost estimates
-- ✅ **Streamlit GUI**: User-friendly interface for non-technical users
-
-### Data Processing
-- Extracts financial data (revenue, EBITDA, RoCE) from MD files
-- Classifies companies into appropriate industry domains
-- Scrapes market data (market size, CAGR, trends)
-- Generates CAGR, margins, and other calculated metrics
-- Verifies all claims against source data
-
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    STREAMLIT GUI / CLI                     │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-            ┌───────────▼──────────┐
-            │   KELP PIPELINE      │
-            │   (main.py)          │
-            └───────────┬──────────┘
-                        │
-      ┌─────────────────┼─────────────────┐
-      │                 │                 │
-┌─────▼────┐     ┌──────▼──────┐   ┌─────▼────────┐
-│   Data   │     │   Domain    │   │ Web Scraper  │
-│Extractor │     │ Classifier  │   │   (Agent 3)  │
-│(Agent 1) │     │  (Agent 2)  │   └──────┬───────┘
-└─────┬────┘     └──────┬──────┘          │
-      │                 │                 │
-      │   ┌─────────────▼─────────────────▼───┐
-      └───►    Content Writer (Agent 4)       │
-          │  - Slide content generation       │
-          │  - LLM-powered insights           │
-          └─────────────┬─────────────────────┘
-                        │
-          ┌─────────────▼──────────────┐
-          │ Citation Verifier (Agent 5)│
-          └─────────────┬──────────────┘
-          ┌─────────────▼──────────────┐
-          │ Image Pipeline (Agent 6)   │
-          └─────────────┬──────────────┘
-                        │
-          ┌─────────────▼──────────────┐
-          │  PPT Assembler (Agent 7)   │
-          │  - Charts & pie charts     │
-          │  - Layout management       │
-          └────────────────────────────┘
+```text
+Markdown company one-pager
+  -> extract company and financial fields
+  -> classify the industry and collect website/market context
+  -> draft slide sections and investment highlights
+  -> match claims to input, calculations or stored web references
+  -> assemble a PowerPoint and citation report
 ```
 
-### Agent Breakdown
+The entry point is [`kelp_ma_automation/main.py`](kelp_ma_automation/main.py). It orchestrates the modules in [`agents/`](kelp_ma_automation/agents): extraction, classification, scraping, content writing, citation matching, and presentation assembly. The output consists of a `.pptx`, a citation report in `.docx`, and token-usage metadata. When available, scraped data is also saved as Markdown. The repository includes domain-specific image directories and PowerPoint templates.
 
-1. **Data Extractor** (`agents/data_extractor.py`)
-   - Parses markdown one-pagers
-   - Extracts structured data (business info, financials, SWOT)
+The main pipeline initializes the scraper with Playwright disabled, so its normal path uses Requests-based discovery and fallback URL guesses. The scraper module also contains a Playwright path, but it is not enabled by the current main entry point. Some market data and associated source references are hard-coded in the scraper rather than retrieved live.
 
-2. **Domain Classifier** (`agents/domain_classifier.py`)
-   - Classifies companies into 8 industry domains
-   - Selects appropriate PPT template
+## Scope and limitations
 
-3. **Web Scraper** (`agents/web_scraper.py`)
-   - Smart page discovery (3-tier fallback)
-   - Market data collection
-   - No text truncation
+- **Human review is required.** The citation module uses heuristic matching and marks some calculations or market claims as verified without proving that the text or value is correct. Its report is an aid for tracing claims, not independent fact-checking. Check financial figures, generated text, references, and the final presentation against primary sources before use.
+- The content writer initializes the default Ollama client and falls back to rule-based text when the model is unavailable. Although the GUI offers provider and model controls, the current main pipeline does not pass those settings into the content writer. Do not assume selecting Gemini in the GUI changes the model used for generation.
+- Local LLM inference does not make the whole workflow offline: website retrieval can send network requests. Avoid using sensitive or confidential one-pagers until the complete data flow, generated artifacts, and deployment environment have been reviewed.
+- The repository includes minimum dependency versions but no locked environment. A fresh installation and complete end-to-end generation have not been independently reproduced for this README. The `requirements.txt` omits Streamlit even though the GUI imports it.
 
-4. **Content Writer** (`agents/content_writer.py`)
-   - Generates slide content
-   - LLM-powered investor insights
-   - Never shortens critical data (products, services)
+## Getting started
 
-5. **Citation Verifier** (`agents/citation_verifier.py`)
-   - Tracks all claims
-   - Verifies against source data
-   - Generates citation DOCX report
-
-6. **Image Pipeline** (`agents/image_pipeline.py`)
-   - Intelligent image selection by filename
-   - Maintains 3:2 aspect ratio
-   - Pixel-perfect scaling
-
-7. **PPT Assembler** (`agents/ppt_assembler.py`)
-   - Fixed grid layout system
-   - Native PPT charts (pie, column)
-   - Domain-specific branding
-
----
-
-## 🚀 Setup
-
-### Prerequisites
-- Python 3.8+
-- Ollama (for local LLM) OR Gemini API key
-- Playwright browsers (for web scraping)
-
-### Step 1: Clone Repository
-  
-```bash
-git clone https://github.com/yourusername/kelp_ma_automation.git
-cd kelp_ma_automation
-```
-
-### Step 2: Install Dependencies
+These commands describe the repository's intended setup and entry points; they have not been verified as a clean end-to-end run. Python, `pip`, and Git are required. Ollama and the `phi4-mini:latest` model are needed for the local LLM path. A network connection is needed to install dependencies and, unless scraping is skipped, for website retrieval.
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/D3vil-coder/Investment-Teaser-Pipeline.git
+cd Investment-Teaser-Pipeline/kelp_ma_automation
+python -m pip install -r requirements.txt
 ```
 
-**Required packages**:
-- `streamlit` - GUI
-- `python-pptx` - PPT generation
-- `playwright` - Web scraping
-- `beautifulsoup4` - HTML parsing
-- `google-generativeai` - Gemini API (optional)
-- `requests`, `httpx` - HTTP clients
-
-### Step 3: Install Playwright Browsers
+For the Streamlit interface, install Streamlit separately because it is not currently listed in the requirements file:
 
 ```bash
-python -m playwright install chromium
+python -m pip install streamlit
+python -m streamlit run gui/app.py
 ```
 
-### Step 4: Set Up LLM
-
-**Option A: Ollama (Local, Free)**
-
-1. Download Ollama: https://ollama.ai/download
-2. Install and run:
-   ```bash
-   ollama pull phi4-mini:latest
-   ```
-3. Verify:
-   ```bash
-   ollama list
-   ```
-
-**Option B: Gemini API (Cloud)**
-
-1. Get API key: https://aistudio.google.com/apikey
-2. Will enter in GUI or set environment variable:
-   ```bash
-   set GEMINI_API_KEY=your_key_here
-   ```
-
-### Step 5: Add Images (Optional)
-
-Place 3:2 ratio images (e.g., 1200x800px) in `images/` folder:
-
-```
-images/
-├── technology1.jpg       # Technology domain, slide 1
-├── manufacturing_main.jpg
-├── office_modern.jpg     # Generic tech office
-├── factory_floor.jpg     # Generic manufacturing
-└── fallback.png          # Default fallback
-```
-
-**Naming convention**: `{domain}{number}.jpg` or `{description}.jpg`
-
-See `images/README.md` for full list.
-
----
-
-## 📖 Usage
-
-### Option 1: Streamlit GUI (Recommended)
-
-1. **Start the GUI**:
-   ```bash
-   python -m streamlit run gui/app.py
-   ```
-
-2. **Open in browser**: http://localhost:8501
-
-3. **Configure LLM**:
-   - Select "Ollama" or "Gemini" in sidebar
-   - If Gemini: Enter API key
-   - If Ollama: Select model (phi4-mini recommended)
-
-4. **Generate Teaser**:
-   - Enter company name
-   - Upload one-pager MD file
-   - Click "🚀 Generate Investment Teaser"
-
-5. **Download**:
-   - PPT file
-   - Citation report (DOCX)
-
-### Option 2: Command Line
+The CLI accepts a company name and path to a Markdown one-pager. From the application directory, an included example is referenced by `../Centum-OnePager.md`:
 
 ```bash
-python main.py "Company Name" "path/to/onepager.md" --output data/output
+python main.py "Centum" "../Centum-OnePager.md" --output data/output --skip-scraping
 ```
 
-**Options**:
-- `--template path/to/template.pptx` - Custom template
-- `--skip-scraping` - Skip web scraping
-- `--batch` - Process multiple companies
+Omit `--skip-scraping` to allow website and market-context retrieval. Run `python main.py --help` for the arguments defined by the script. Both the GUI and CLI write files, and generation can take time depending on the selected model and available hardware.
 
-**Batch mode**:
-```bash
-python main.py "Batch" "data/input/" --batch --output data/output
-```
+## Repository guide
 
----
+| Path | Purpose |
+| --- | --- |
+| [`kelp_ma_automation/main.py`](kelp_ma_automation/main.py) | Pipeline orchestration and CLI |
+| [`kelp_ma_automation/gui/app.py`](kelp_ma_automation/gui/app.py) | Streamlit interface |
+| [`kelp_ma_automation/agents/`](kelp_ma_automation/agents) | Extraction, scraping, content, citations and slide assembly |
+| [`kelp_ma_automation/config/`](kelp_ma_automation/config) | Industry and model configuration |
+| [`kelp_ma_automation/templates/`](kelp_ma_automation/templates) | Presentation templates |
+| [`kelp_ma_automation/requirements.txt`](kelp_ma_automation/requirements.txt) | Declared Python dependencies |
 
-## 📁 Project Structure
+## Next improvements
 
-```
-kelp_ma_automation/
-├── agents/
-│   ├── data_extractor.py        # Agent 1: Parse MD files
-│   ├── domain_classifier.py     # Agent 2: Classify domain
-│   ├── web_scraper.py           # Agent 3: Web scraping
-│   ├── content_writer.py        # Agent 4: Content generation
-│   ├── citation_verifier.py     # Agent 5: Verification
-│   ├── ppt_assembler.py         # Agent 7: PPT creation
-│   └── image_pipeline.py        # Image handling
-│
-├── config/
-│   ├── domain_templates.py      # Domain-specific configs
-│   └── brand_guidelines.py      # Kelp branding
-│
-├── gui/
-│   └── app.py                   # Streamlit interface
-│
-├── images/                      # Image library
-│   ├── fallback.png             # Default image
-│   └── README.md                # Image guidelines
-│
-├── templates/                   # PPT templates (8 domains)
-│   ├── manufacturing_template.pptx
-│   ├── technology_template.pptx
-│   └── ...
-│
-├── utils/
-│   ├── ollama_client.py         # Ollama LLM client
-│   ├── token_tracker.py         # Token usage tracking
-│   └── ...
-│
-├── data/
-│   ├── input/                   # Input one-pagers
-│   └── output/                  # Generated PPTs
-│
-├── main.py                      # Main pipeline
-├── requirements.txt             # Dependencies
-└── README.md                    # This file
-```
-
----
-
-## ⚙️ Configuration
-
-### Domain Templates
-
-Edit `config/domain_templates.py` to customize:
-- Industry keywords for classification
-- Slide structures
-- Content priorities
-
-### Branding
-
-Edit `config/brand_guidelines.py` for:
-- Colors (PRIMARY, SECONDARY, ACCENT)
-- Fonts
-- Logo placement
-
-### Ollama Models
-
-Supported models:
-- `phi4-mini:latest` (Recommended, fast)
-- `llama3.2:latest`
-- `qwen2.5:latest`
-- `mistral:latest`
-
-Change in GUI sidebar or `utils/ollama_client.py`
-
----
-
-## 🐛 Troubleshooting
-
-### "Ollama not available"
-- Check Ollama is running: `ollama list`
-- Restart Ollama service
-- Pull model: `ollama pull phi4-mini:latest`
-
-### "Playwright install failed"
-```bash
-python -m playwright install chromium
-```
-
-### "No module named 'google.generativeai'"
-```bash
-pip install google-generativeai
-```
-
-### Image not appearing
-- Check image is in `images/` folder
-- Verify 3:2 aspect ratio (e.g., 1200x800px)
-- Check filename matches domain (e.g., `technology1.jpg`)
-- Fallback image (`fallback.png`) will be used if no match
-
-### Pie chart not showing shareholder names
-- Ensure shareholder data includes percentages
-- Format: "Promoters: 65%", "FII - 20%", etc.
-
-### Empty space on Slide 3
-- Check one-pager has SWOT data
-- Strengths, Opportunities should have 5+ items
-- LLM will generate insights if data available
-
----
-
-## 📊 Token Usage
-
-Token costs are tracked automatically:
-
-- **Console output**: Shows USD + INR
-- **JSON file**: `data/output/{company}/token_usage.json`
-  ```json
-  {
-    "total_tokens": 5420,
-    "estimated_cost_usd": 0.542,
-    "estimated_cost_inr": 45.26
-  }
-  ```
-
-Conversion rate: 1 USD = ₹83.5
-
----
-
-## 🎨 Customization
-
-### Add New Domain Template
-
-1. Create template: `templates/newdomain_template.pptx`
-2. Add to `config/domain_templates.py`:
-   ```python
-   'newdomain': {
-       'keywords': ['keyword1', 'keyword2'],
-       'color': RGBColor(R, G, B)
-   }
-   ```
-3. Add images: `images/newdomain1.jpg`, etc.
-
-### Modify Slide Layout
-
-Edit `agents/ppt_assembler.py`:
-- `LAYOUT` dict for positioning (inches)
-- `_build_slide_X` methods for content
-
----
-
-## 📝 Input Format
-
-One-pager must be Markdown with sections:
-
-```markdown
-# Company Name
-
-## Business Description
-[Description here]
-
-## Products & Services
-- Product 1
-- Product 2
-
-## Industries Served
-- Industry 1
-
-## Financials
-### Revenue (₹ Cr)
-- FY23: 150
-- FY24: 180
-
-### EBITDA (₹ Cr)
-- FY23: 30
-- FY24: 40
-
-## SWOT
-### Strengths
-- Strength 1
-
-### Opportunities
-- Opportunity 1
-
-## Key Milestones
-- {date: "2024", milestone: "Achievement"}
-
-## Key Shareholders
-- Promoters: 65%
-- FII: 20%
-- Public: 15%
-```
-
-See `data/input/` for examples.
-
----
-
-
-## 📄 License
-
-MIT License - See LICENSE file
-
----
+Wire provider and model selection through the full pipeline, add a locked and tested environment, compare generated claims against explicit source spans and values, replace or date hard-coded market data, and add end-to-end tests with public sample inputs and expected outputs.
 
